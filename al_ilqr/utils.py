@@ -8,7 +8,7 @@ import numpy as np
 
 from typing import TYPE_CHECKING, Any
 
-from lcp_physics.physics.forces import yield_body_multiforce, get_ix_force_torque_list
+from lcp3d.physics.forces import yield_body_multiforce, get_ix_force_torque_list
 
 if TYPE_CHECKING:
     from .helpers import BaseILQRDynSys

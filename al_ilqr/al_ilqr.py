@@ -9,7 +9,7 @@ import pickle
 import numpy as np
 import torch
 
-from iLQR.utils import dfdx_vmap, print_dict, col
+from .utils import dfdx_vmap, print_dict, col
 
 from .config import iLQRConfigDefault, ALConfigDefault
 
@@ -293,7 +293,6 @@ class PyLQR_iLQRSolver:
         return  opt_cost, ctrl_cost, ilqr_cost.view(-1), aug_cost, viols
 
     def evaluate_trajectory_cost(self):
-        a = self.conf.small_increment_a
         x_plant_traj, u_plant_traj = self.plant_dyn.get_plant_rollouts()
         x_traj, u_traj = self.plant_dyn.get_rollouts()
         assert len(x_plant_traj) - 1 == len(u_plant_traj), f"Input array must be one shorter. {len(x_plant_traj) - 1} == {len(u_plant_traj)}"
@@ -302,7 +301,13 @@ class PyLQR_iLQRSolver:
         vals = (x_traj, u_traj+[None], x_plant_traj, u_plant_traj+[None])
         opt_c, ctr_c, lqr_c, aug_c, viols = zip(*[self.evaluate_step_cost(t, x, u, xp, up) for t, (x, u, xp, up) in enumerate(zip(*vals))])
 
-        return torch.stack(opt_c).sum(), torch.stack(lqr_c).sum(), torch.stack(aug_c).sum(), torch.stack(ctr_c).sum(), torch.stack(viols)
+
+        # Diffredmax
+        deltas_squared = torch.stack([((x1-x0)/self.plant_dyn.plant.dt)**2 for x0, x1 in zip(x_traj[:-1], x_traj[1:])])
+        opt_vel_c = 1e-6 * deltas_squared.sum()
+        print("vel_cost:", opt_vel_c.item())
+
+        return torch.stack(opt_c).sum() + opt_vel_c, torch.stack(lqr_c).sum(), torch.stack(aug_c).sum(), torch.stack(ctr_c).sum(), torch.stack(viols)
 
     def evaluate_total_cost(self):
         # Optim cost + controller cost + ilqr_increments cost
