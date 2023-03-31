@@ -395,12 +395,7 @@ class PyLQR_iLQRSolver:
                 ) = self.forward_propagation(J_total, J_ilqr, J_aug)
 
 
-                # see if it is converged
-                converged = (
-                    np.abs((J_new_total - J_total) / J_total) < self.conf.eps_cost
-                )
-
-                if accept:  # successful forward pass
+                if accept:  # successful forward pass ilqr_accept_forward_pass
                     J_total = J_new_total
                     J_ilqr = J_new_ilqr
                     J_aug = J_new_aug
@@ -414,14 +409,14 @@ class PyLQR_iLQRSolver:
                     self.iteration_log(_i, _ii, violations)
 
                 # Convergence and regularization
-                if converged:  # iLQR converged, line_search is not improving that much
+                if converged:  # iLQR converged, line_search is not improving that much ilqr_converged
                     if verbose:
                         print(
                             f"iLQR Converged at iteration {_i + 1}; J = {J_total}; J_aug = {self.J_hist_aug[-1]}; {reg_N}th reg = {self.reg}"
                         )
                     break
 
-                if not accept:  # not a successful forward pass
+                if not accept:  # not a successful forward pass ilqr_max_reg_reached
                     if self.reg > self.conf.reg_max:
                         print(
                             "Exceeds regularization limit at iteration {0}; terminate the iterations of inner-loop".format(
@@ -429,7 +424,7 @@ class PyLQR_iLQRSolver:
                             )
                         )
                         break
-                    if J_total > self.conf.max_cost:
+                    if J_total > self.conf.max_cost: # ilqr_max_cost_exceeded
                         print(
                             f"Exceeds maximal allowed cost({J_total}>{self.conf.max_cost}); terminate the inner-loop"
                         )
@@ -446,11 +441,11 @@ class PyLQR_iLQRSolver:
             if not self.augmented.not_empty:
                 print("No constraints, no AL iteration required.")
                 break
-            elif torch.all(violations < self.augmented.conf.al_cmax):
+            elif torch.all(violations < self.augmented.conf.al_cmax): # al_no_violation
                 print("end_violation:", violations[-1])
                 print("AL: Constraint tolerance met.")
                 break
-            elif torch.all(self.augmented.mu > self.augmented.conf.al_mu_max):
+            elif torch.all(self.augmented.mu > self.augmented.conf.al_mu_max): # al_max_mu_reached
                 print("AL: Maximal penalty:{self.augmented.conf.al_mu_max}, reached.")
                 break
             print(
@@ -513,15 +508,19 @@ class PyLQR_iLQRSolver:
                 # the rollouts are saved in the plant
                 # successful step, decrease the regularization term, momentum like adaptive regularization
                 self.reg = max([self.conf.reg_min, self.reg / self.conf.reg_factor])
-                J_total = J_new_total
                 print(
-                    f"  J = {J_total:.5f}; {jj}th/{self.conf.iter_line_search} alpha={alpha:.5f}; reg = {self.reg:.5f}"
+                    f"  J = {J_new_total:.5f}; {jj}th/{self.conf.iter_line_search} alpha={alpha:.5f}; reg = {self.reg:.5f}"
                 )
                 break
             else:
                 alpha = 0.5 * alpha
         if not accept:
             self.plant_dyn.reset_rollouts()
+
+        # see if it is converged
+        converged = (
+            np.abs((J_new_total - J_total) / J_total) < self.conf.eps_cost
+            )
 
         return (
             J_new_total,
