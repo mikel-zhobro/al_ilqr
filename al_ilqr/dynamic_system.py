@@ -1,5 +1,5 @@
 from __future__ import print_function, annotations
-from typing import Callable, List, Sequence, Tuple, Union, Any
+from typing import Callable, Tuple, Union, Any
 from abc import ABC, abstractmethod
 import time
 from tqdm import tqdm
@@ -136,7 +136,7 @@ class BaseILQRDynSys(ABC):
         ilqr_cost = x0._base_tensor.new_zeros(1)
         aug_cost = x0._base_tensor.new_zeros(1)
         _start = time.time()
-        for t, u_tmp in tqdm(enumerate(u_array), desc="Rollout"):  # disturbs the cluster stdout
+        for t, u_tmp in enumerate(tqdm(u_array, desc="Rollout")):  # disturbs the cluster stdout
             x, ilqr_l, aug_l, viol = self._step_rollout(x, u_tmp, t, req_grad)
             ilqr_cost += ilqr_l
             aug_cost += aug_l
@@ -187,7 +187,7 @@ class BaseILQRDynSys(ABC):
 
         _start = time.time()
         x = x0
-        for t, u_tmp in tqdm(enumerate(u_array), desc="Rollout"):
+        for t, u_tmp in enumerate(tqdm(u_array, desc="Rollout")):
             # Compute u
             u = u_tmp + (
                 alpha * k_array[t] + K_array[t] @ (x.diff(x_array[t]).view(-1, 1))
@@ -199,7 +199,7 @@ class BaseILQRDynSys(ABC):
             viols.extend(viol)
             running_cost = (ilqr_cost+aug_cost).item()
             if running_cost > current_cost:
-                print(f"\t--- Rollout exploded with cost:{running_cost}>{current_cost}, time:({time.time()-_start:.5f})")
+                # print(f"\t--- Rollout exploded with cost:{running_cost}>{current_cost}, time:({time.time()-_start:.5f})")
                 return ilqr_cost+aug_cost, ilqr_cost, aug_cost, torch.stack(viols)
 
         self.x_rollout_traj_0.append(x.detach().requires_grad_())
@@ -282,7 +282,7 @@ class ILQRDynSys(BaseILQRDynSys):
         viol = [viol]
 
         if t == self.T-1:
-            print("TERMINALKA no feedback")
+            # print("TERMINALKA no feedback")
             ilqr_l_term, aug_l_term , viol_term = self.compute_step_costs(self.T, x_t, x_t)
             ilqr_l += ilqr_l_term
             aug_l += aug_l_term
@@ -428,7 +428,7 @@ class ILQRDynSysClosedLoop(BaseILQRDynSys):
 
         viol = [viol]
         if t == self.T-1:
-            print("TERMINALKA")
+            # print("TERMINALKA")
             ilqr_l_term, aug_l_term , viol_term = self.compute_step_costs(self.T, x_hat_new_, x_plant_new)
 
             ilqr_l += ilqr_l_term
@@ -514,3 +514,39 @@ class Controller(ABC):
     # @abstractmethod
     # def input_derivatives(self, x_des:BaseState, x:BaseState, x_c:BaseState, req_partial_grad=False):
     #     pass
+
+
+
+
+
+def test_gradients(dyn_sys: DynamicSystem, x: BaseState, u:torch.Tensor, eps = 1e-15):
+    # Implementation
+    _x0 = x.clone().detach().requires_grad_(True)
+    _u0 = u.clone().detach().requires_grad_(True)
+    x1 = dyn_sys.step_abs(_x0, _u0, 0)
+    dx1_x0, dx1_u0 = dyn_sys.get_derivatives(x1, _x0, _u0, 0)
+
+
+    # Finite differences check
+    nx = dyn_sys.nx
+    nu = dyn_sys.nu
+
+    dx1_x0_fd, dx1_u0_fd = torch.zeros((nx, nx)), torch.zeros((nx, nu))
+
+    # tqdm print progress
+
+    for n in range(nx):
+        dx = torch.zeros(nx)
+        dx[n] += eps
+        x1 = dyn_sys.step_abs(x + dx, u, 0)
+        x0 = dyn_sys.step_abs(x + (-dx), u, 0)
+        dx1_x0_fd[:, n] = (x1 - x0) / (2 * eps)
+
+    for n in range(nu):
+        du = torch.zeros(nu)
+        du[n] += eps
+        x1 = dyn_sys.step_abs(x, u + du, 0)
+        x0 = dyn_sys.step_abs(x, u + (-du), 0)
+        dx1_u0_fd[:, n] = (x1 - x0) / (2 * eps)
+
+    return dx1_x0, dx1_u0, dx1_x0_fd, dx1_u0_fd
