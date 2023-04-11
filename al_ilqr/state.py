@@ -3,9 +3,8 @@ from abc import ABC, abstractmethod
 
 import torch
 import numpy as np
-from functorch import vmap
-
 from pytorch3d.transforms import so3_log_map, so3_exp_map, matrix_to_quaternion
+
 
 def get_body_state(state: MultiBodyState, ixs: list[int]):
     obj = MultiBodyState(

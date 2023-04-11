@@ -135,8 +135,8 @@ class LossFunctionBase(ABC):
     # ---------- Gradients --------------
     def _dldx(self, x_t, u_t: torch.Tensor, t: int, terminal=False) -> torch.Tensor:
         return (
-            x_t.d_in().grad
-            if x_t.d_in().grad is not None
+            x_t.grad
+            if x_t.grad is not None
             else torch.zeros_like(x_t.d_in())
         )
 

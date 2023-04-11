@@ -1,9 +1,8 @@
 import torch
-from typing import Any, Sequence, Union
-from functorch import vmap
+from typing import Any, Union
 import numpy as np
 
-from .state import BaseState, BasicState, StackedState, MultiBodyState, get_body_state
+from .state import BaseState
 from .loss import LossFunctionBase
 from .dynamic_system import (
     DynamicSystem,
@@ -12,9 +11,8 @@ from .dynamic_system import (
     ILQRDynSysClosedLoop,
     Controller,
 )
-from .constraints import EqConstraint, InEqConstraint, Constraint
+from .constraints import Constraint
 from .al_ilqr import PyLQR_iLQRSolver
-from .utils import dfdx_vmap
 
 
 def createILQRDynSys(

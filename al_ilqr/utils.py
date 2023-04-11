@@ -1,17 +1,11 @@
 from __future__ import print_function, annotations
-import time
+from typing import Any
 import torch
-from functorch import vmap
-from scipy.signal.windows import gaussian
-from numpy import linalg as la
 import numpy as np
+from numpy import linalg as la
+from scipy.signal.windows import gaussian
 
-from typing import TYPE_CHECKING, Any
 
-from lcp3d.physics.forces import yield_body_multiforce, get_ix_force_torque_list
-
-if TYPE_CHECKING:
-    from .helpers import BaseILQRDynSys
 
 class col:
     HEADER = "\033[95m"
@@ -46,7 +40,7 @@ def dfdx_vmap(y, x, allow_unused=False, create_graph=False) -> torch.Tensor:
 
     N = _y.shape[0]
     I_N = torch.eye(N, device=_x[0].device)
-    return vmap(get_vjp)(I_N)
+    return torch.vmap(get_vjp)(I_N)
 
 def filter_me(sig, kernel_size=23, mode='replicate'):
     # sig: [N, W, H]
@@ -128,6 +122,7 @@ def print_dict(data_dict: dict[str, Any], n_tab=0):
         )
 
 if __name__ == '__main__':
+    import time
     st = time.time()
     for i in range(10):
         for j in range(2, 100):
