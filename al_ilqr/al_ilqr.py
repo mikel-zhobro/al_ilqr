@@ -303,11 +303,11 @@ class PyLQR_iLQRSolver:
 
 
         # Diffredmax
-        deltas_squared = torch.stack([((x1-x0)/self.plant_dyn.plant.dt)**2 for x0, x1 in zip(x_traj[:-1], x_traj[1:])])
-        opt_vel_c = 1e-6 * deltas_squared.sum()
-        print("vel_cost:", opt_vel_c.item())
+        smooth_input_loss = 0.
+        # smooth_input_loss = 1e-4 * torch.stack([((x1-x0)/self.plant_dyn.plant.dt)**2 for x0, x1 in zip(u_traj[:-1], u_traj[1:])]).sum()
 
-        return torch.stack(opt_c).sum() + opt_vel_c, torch.stack(lqr_c).sum(), torch.stack(aug_c).sum(), torch.stack(ctr_c).sum(), torch.stack(viols)
+
+        return torch.stack(opt_c).sum() + smooth_input_loss, torch.stack(lqr_c).sum(), torch.stack(aug_c).sum(), torch.stack(ctr_c).sum(), torch.stack(viols)
 
     def evaluate_total_cost(self):
         # Optim cost + controller cost + ilqr_increments cost
@@ -442,7 +442,7 @@ class PyLQR_iLQRSolver:
                 print("No constraints, no AL iteration required.")
                 break
             elif torch.all(violations < self.augmented.conf.al_cmax): # al_no_violation
-                print("end_violation:", violations[-1])
+                print("end_violation:", violations[-1].squeeze().tolist())
                 print("AL: Constraint tolerance met.")
                 break
             elif torch.all(self.augmented.mu > self.augmented.conf.al_mu_max): # al_max_mu_reached
