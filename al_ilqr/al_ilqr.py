@@ -68,36 +68,12 @@ class AugmentedElements:
             (self.T + 1, self.N)
         )  # T_steps+1 * N_c
 
-    def initialize2(self, x_array: list[BaseState], u_array: list[Any]):
-        if self.not_empty:
-            assert (
-                len(x_array) - 1 == len(u_array) == self.T
-            ), f"{len(x_array)-1} == {len(u_array)} == {self.T}"
-
-            self.lamda = x_array[0]._base_tensor.new_zeros(
-                (self.T + 1, self.N)
-            )  # T_steps+1 * N_c
-            self.mu = self.conf.al_mu_init * x_array[0]._base_tensor.new_ones(
-                (self.T + 1, self.N)
-            )  # T_steps+1 * N_c
-
     @property
     def T(self):
         return self.conf.T
 
     def _evaluate(self, x_plant: BaseState, u_plant, t):
         return torch.cat([C(x_plant, u_plant, t) for C in self.constraints])  # (N_c, )
-
-    def _get_aug_lag_matrices(
-        self, x_plant: BaseState, u_plant: Union[torch.Tensor, BaseState], t
-    ):
-        lamda_t = self.lamda[t].view(-1, 1)
-        c_t = self._evaluate(x_plant, u_plant, t).view(-1, 1)
-        tmp = self.mu[t].clone().view(-1, 1)
-        tmp[torch.logical_and(c_t < 0, torch.abs(lamda_t) < 1e-5)] = 0
-        tmp[self.eq_ix] = self.mu[t][self.eq_ix].view(-1, 1)
-        Iuk = tmp.view(-1).diag()  # (N_c, N_c)
-        return c_t, lamda_t, Iuk
 
     def _jacobian(self, x: BaseState, u: Union[torch.Tensor, BaseState], t: int):
         cx: list[torch.Tensor] = []
@@ -109,12 +85,23 @@ class AugmentedElements:
             cu.append(cui)
         return torch.row_stack(cx), torch.row_stack(cu)  # (N_c, n_x), (N_c, n_u)
 
+    def _get_aug_lag_matrices(
+        self, x_plant: BaseState, u_plant: Union[torch.Tensor, BaseState], t
+    ):
+        lamda_t = self.lamda[t].view(-1, 1)
+        c_t = self._evaluate(x_plant, u_plant, t).view(-1, 1)
+        tmp = self.mu[t].clone().view(-1, 1) # (N_c, 1)
+        tmp[torch.logical_and(c_t < 0, torch.abs(lamda_t) < 1e-5)] = 0
+        tmp[self.eq_ix] = self.mu[t][self.eq_ix].view(-1, 1)
+        Iuk = tmp.view(-1).diag()  # (N_c, N_c)
+        return c_t, lamda_t, Iuk
+
     def aug_step_cost(self, x: BaseState, u, t:int):
         cost, violation = x._base_tensor.new_zeros(1), x._base_tensor.new_zeros(1)
         if self.not_empty:
             c_t, lamda_t, Iuk = self._get_aug_lag_matrices(x, u, t)
             cost = lamda_t.T @ c_t + 0.5 * c_t.T @ Iuk @ c_t
-            violation = c_t.detach().abs()
+            violation = c_t.detach()  # .abs()
         return cost.view(-1), violation
 
     # @torch.no_grad()
@@ -156,10 +143,8 @@ class AugmentedElements:
                 x_plant_t.requires_grad_()
                 u_plant_t.requires_grad_()
                 c_t, lamda_t, Iuk = self._get_aug_lag_matrices(x_plant_t, u_plant_t, t)
-                # c_t = torch.cat([C(x, u, t) for C in self.constraints])
                 cx = dfdx_vmap(c_t.view(-1), x)
                 cu = dfdx_vmap(c_t.view(-1), u, allow_unused=True)
-                # cx, cu = self._jacobian(x, u, t) # (N_c, n_x), (N_c, n_u)
 
             Qx += cx.T @ (lamda_t + Iuk @ c_t)
             Qu += cu.T @ (lamda_t + Iuk @ c_t)
@@ -195,6 +180,20 @@ class AugmentedElements:
             )
             self.mu = self.mu * self.conf.al_psi
             self.current_it += 1
+
+    # Helpers
+    @ torch.no_grad()
+    def get_violations(self, xp_array, up_array):
+        viol_list = [] # len(viol_list) = N_constraints
+        for C in self.constraints:
+            costs = torch.cat([
+                C(x, u, t).detach() for t, x, u in zip(range(self.T), xp_array, up_array)
+                ])
+            if C.type == C.EQ:
+                costs = torch.clamp(costs, min=0.)
+            viol_list.append(costs)
+        types_str = ["eq" if c.type == c.EQ else "ineq" for c in self.constraints]
+        return viol_list, types_str
 
     def print_info(self, n_tab=0):
         print("\t"*n_tab + f"--- {col.HEADER}Augmented Lagrangian Info{col.ENDC}---")
@@ -269,6 +268,8 @@ class PyLQR_iLQRSolver:
         self.augmented.conf.update(**kwargs)
 
     def evaluate_step_cost(self, t, x: BaseState, u, xp, up):
+        """ Evaluate the cost of a single step used for running cost and to compute total costs
+        """
         terminal = (t == self.conf.T)
 
         opt_cost = self.cost.evaluate(xp, up, t, terminal)
@@ -293,6 +294,8 @@ class PyLQR_iLQRSolver:
         return  opt_cost, ctrl_cost, ilqr_cost.view(-1), aug_cost, viols
 
     def evaluate_trajectory_cost(self):
+        """ This returns cost of the trajectory for backpropagation purposes.
+        """
         x_plant_traj, u_plant_traj = self.plant_dyn.get_plant_rollouts()
         x_traj, u_traj = self.plant_dyn.get_rollouts()
         assert len(x_plant_traj) - 1 == len(u_plant_traj), f"Input array must be one shorter. {len(x_plant_traj) - 1} == {len(u_plant_traj)}"
@@ -304,12 +307,14 @@ class PyLQR_iLQRSolver:
 
         # Diffredmax
         smooth_input_loss = 0.
-        # smooth_input_loss = 1e-4 * torch.stack([((x1-x0)/self.plant_dyn.plant.dt)**2 for x0, x1 in zip(u_traj[:-1], u_traj[1:])]).sum()
+        # smooth_input_loss = 1e-8 * torch.stack([((x1-x0)/self.plant_dyn.plant.dt)**2 for x0, x1 in zip(u_traj[:-1], u_traj[1:])]).sum()
 
 
         return torch.stack(opt_c).sum() + smooth_input_loss, torch.stack(lqr_c).sum(), torch.stack(aug_c).sum(), torch.stack(ctr_c).sum(), torch.stack(viols)
 
     def evaluate_total_cost(self):
+        """ This returns cost floats for printing and logging purposes.
+        """
         # Optim cost + controller cost + ilqr_increments cost
         opt_c, lqr_c, aug_c, ctrl_c, viols = self.evaluate_trajectory_cost()
 
@@ -403,8 +408,8 @@ class PyLQR_iLQRSolver:
 
                     self.J_hist_total.append(J_total)
                     self.J_hist_ilqr.append(J_ilqr)
-                    # self.J_hist_aug.append(J_aug)
-                    self.J_hist_aug.append(violations.sum())
+                    self.J_hist_aug.append(J_aug)
+                    # self.J_hist_aug.append(violations.sum())
 
                     self.iteration_log(_i, _ii, violations)
 
@@ -586,30 +591,6 @@ class PyLQR_iLQRSolver:
         dx.append(x_array[-1].grad)
         dxx.append(dfdx_vmap(dx[-1], x_array[-1]))
         _end2 = time.time() - _start2
-        return dx, du, dxx, duu, dux, _end2
-
-    def compute_loss_derivs2(self):
-
-        x_array, u_array = self.plant_dyn.get_rollouts()
-        opt_c, ctrl_c, lqr_c, aug_c, _ = self.evaluate_trajectory_cost()
-        ll = opt_c + ctrl_c + lqr_c + aug_c
-
-
-        _start2 = time.time()
-        # ll.backward(retain_graph=True, create_graph=True)
-        # dx = [x.grad for x in x_array]
-        # du = [u.grad for u in u_array]
-        dx = [dfdx_vmap(ll, x, create_graph=True).view(-1) for i, x in enumerate(x_array)]
-        du = [dfdx_vmap(ll, u, create_graph=True).view(-1) for i, u in enumerate(u_array)]
-        dxx = [dfdx_vmap(dfdx, x) for i, (dfdx, x) in enumerate(zip(dx, x_array))]
-        duu = [dfdx_vmap(dfdu, u, True) for i, (dfdu, u) in enumerate(zip(du, u_array))]
-        # duu.append(torch.zeros_like(duu[-1]))
-        dux = [dfdx_vmap(dfdu, x, True) for i, (dfdu, x) in enumerate(zip(du, x_array))]
-        # dux.append(torch.zeros_like(dux[-1]))
-        _end2 = time.time() - _start2
-
-        # dx, du, dxx, duu, dux, _end2 = self.cost.comp_trajectory_derivs(x_array, u_array)
-
         return dx, du, dxx, duu, dux, _end2
 
     def back_propagation(self, lqr_sys_f, accept=True):
@@ -877,18 +858,10 @@ class PyLQR_iLQRSolver:
             "time_iteration": time_taken / nr_iters,
             "reg": self.reg,
         }
-        for i, C in enumerate(self.augmented.constraints):
-            costs = (
-                torch.cat(
-                    [
-                        C(x, u, t).detach()
-                        for t, x, u in zip(range(self.T), xp_array, up_array)
-                    ]
-                )
-                .cpu()
-                .numpy()
-            )
-            res_dict["constraints"][f'{i}_{"eq" if C.type == C.EQ else "ineq"}'] = costs
+
+        viol_list, const_types = self.augmented.get_violations(xp_array, up_array)
+        for i, (viol, typ) in enumerate(zip(viol_list, const_types)):
+            res_dict["constraints"][f'{i}_{typ}'] = viol.cpu().numpy()
         return res_dict
 
     def iteration_log(self, _i, _ii, violations):
