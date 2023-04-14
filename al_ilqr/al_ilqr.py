@@ -102,6 +102,7 @@ class AugmentedElements:
             c_t, lamda_t, Iuk = self._get_aug_lag_matrices(x, u, t)
             cost = lamda_t.T @ c_t + 0.5 * c_t.T @ Iuk @ c_t
             violation = c_t.detach()  # .abs()
+            violation[self.ineq_ix] = torch.clamp(violation[self.ineq_ix], min=0.0)
         return cost.view(-1), violation
 
     # @torch.no_grad()
@@ -143,7 +144,7 @@ class AugmentedElements:
                 x_plant_t.requires_grad_()
                 u_plant_t.requires_grad_()
                 c_t, lamda_t, Iuk = self._get_aug_lag_matrices(x_plant_t, u_plant_t, t)
-                cx = dfdx_vmap(c_t.view(-1), x)
+                cx = dfdx_vmap(c_t.view(-1), x, allow_unused=True)
                 cu = dfdx_vmap(c_t.view(-1), u, allow_unused=True)
 
             Qx += cx.T @ (lamda_t + Iuk @ c_t)
@@ -189,7 +190,7 @@ class AugmentedElements:
             costs = torch.cat([
                 C(x, u, t).detach() for t, x, u in zip(range(self.T), xp_array, up_array)
                 ])
-            if C.type == C.EQ:
+            if C.type == C.INEQ:
                 costs = torch.clamp(costs, min=0.)
             viol_list.append(costs)
         types_str = ["eq" if c.type == c.EQ else "ineq" for c in self.constraints]
@@ -309,8 +310,9 @@ class PyLQR_iLQRSolver:
         smooth_input_loss = 0.
         # smooth_input_loss = 1e-8 * torch.stack([((x1-x0)/self.plant_dyn.plant.dt)**2 for x0, x1 in zip(u_traj[:-1], u_traj[1:])]).sum()
 
+        viols = torch.stack(viols)
 
-        return torch.stack(opt_c).sum() + smooth_input_loss, torch.stack(lqr_c).sum(), torch.stack(aug_c).sum(), torch.stack(ctr_c).sum(), torch.stack(viols)
+        return torch.stack(opt_c).sum() + smooth_input_loss, torch.stack(lqr_c).sum(), torch.stack(aug_c).sum().detach(), torch.stack(ctr_c).sum(), viols
 
     def evaluate_total_cost(self):
         """ This returns cost floats for printing and logging purposes.

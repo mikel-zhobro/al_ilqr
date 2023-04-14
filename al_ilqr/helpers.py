@@ -65,6 +65,7 @@ class Optim:
         initializer_ctrl: Union[Controller, None]=None,
         initializer_u_init: Union[list[BaseState], None]=None
     ):
+        self.res_dict["T"] = self.T
         self.res_dict["x_plant_array_des"] = np.stack([x.numpy() for x in x_des_traj])
 
         # solve
