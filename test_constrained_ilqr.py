@@ -7,18 +7,14 @@ import matplotlib.pyplot as plt
 from typing import Union
 
 from al_ilqr.helpers import (
-    BasicState,
-    StackedState,
     DynamicSystem,
-    EqConstraint,
-    InEqConstraint,
-    Constraint,
     LossFunctionBase,
     Controller,
     Optim,
-    dfdx_vmap,
 )
-
+from al_ilqr.state import BasicState, StackedState
+from al_ilqr.constraints import EqConstraint, InEqConstraint, Constraint
+from al_ilqr.utils import dfdx_vmap
 
 class MyLossAuto(LossFunctionBase):
     def __init__(self, T) -> None:
@@ -327,8 +323,8 @@ def plot_ilqr_result(res):
 if __name__ == "__main__":
     T = 150
     analytical = False
-    test = True  # for this, analytical has to also be yes
-    controlled = False
+    test = False  # for this, analytical has to also be yes
+    controlled = True
 
     # --------------------------------------------------------------------------------------
     # 1. Building
@@ -383,7 +379,7 @@ if __name__ == "__main__":
     if my_controller is not None:
         x0 = StackedState([x0, my_controller.init_state()])
         # u_init_traj = [u.detach().clone() for u in x_des_traj[:-1]]
-        u_init_traj = [x_des_traj[-1].detach()]*(len(x_des_traj)-1)
+        u_init_traj = [x_des_traj[-1].detach()]*T
     else:
         u_init_traj = list(
             torch.rand(

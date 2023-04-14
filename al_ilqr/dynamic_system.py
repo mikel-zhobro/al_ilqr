@@ -168,9 +168,9 @@ class BaseILQRDynSys(ABC):
         self.clear_rollouts()
         req_grad = self.requires_grad
 
-        x0 = x_array[0] if not self.feedback_controlled else StackedState([x_array[0], self.controller.init_state()])
+        x0 = x_array[0]
 
-        # Case without feedback (only x0 required)
+        # Case without feedback
         if not k_array or not K_array: # i.e. either of the lists is empty
             tmp =  self._rollout(x0, u_array)
             try:
@@ -203,8 +203,6 @@ class BaseILQRDynSys(ABC):
                 return ilqr_cost+aug_cost, ilqr_cost, aug_cost, torch.stack(viols)
 
         self.x_rollout_traj_0.append(x.detach().requires_grad_())
-
-        ilqr_l, aug_l, viol = self.compute_step_costs(self.T, x, x)
 
         try:
             self.plant.render2()
@@ -369,36 +367,7 @@ class ILQRDynSysClosedLoop(BaseILQRDynSys):
     def _step_rollout(
         self, x_hat: StackedState, u_hat: BaseState, t: int, req_grad: bool
     ):
-        # Prepare tensors
-        # u_ = u.detach().requires_grad_(req_grad)
-        # u_hat_ = u_hat.detach().requires_grad_(req_grad)
-
-        # # Seperate check
-        # x_c_ = x_hat.states_list[1].detach().requires_grad_(req_grad)
-        # x_ = x_hat.states_list[0].detach().requires_grad_(req_grad)
-        # err = self.controller.get_err(u_hat_, x_c_)
-
-        # # Controller stuff
-        # err = self.controller.get_err(u_hat_, x_)
-        # u_plant = self.controller.compute_input(err, x_c_).view(-1)
-        # x_c_new = self.controller.update_state(err, x_c_)
-        # x_new = self.plant.step(x_, u_plant, t)
-        # # Autograd derivatives [to be removed]
-        # # ------------------------------------------------------------------------------
-        # fu_hat_1_autograd = dfdx_vmap(x_new.d_out(), u_hat_).numpy()
-        # fu_hat_2_autograd = dfdx_vmap(x_c_new.d_out(), u_hat_).numpy()
-        # f_hat_u_hat_autograd = np.block([[fu_hat_1_autograd], [fu_hat_2_autograd]])
-
-        # fx_hat_1_1_autograd = dfdx_vmap(x_new.d_out(), x_.d_in()).numpy()
-        # fx_hat_2_1_autograd = dfdx_vmap(x_c_new.d_out(), x_.d_in()).numpy()
-        # fx_hat_1_2_autograd = dfdx_vmap(x_new.d_out(), x_c_.d_in()).numpy()
-        # fx_hat_2_2_autograd = dfdx_vmap(x_c_new.d_out(), x_c_.d_in()).numpy()
-        # f_hat_x_hat_autograd = np.block([[fx_hat_1_1_autograd, fx_hat_1_2_autograd],[fx_hat_2_1_autograd, fx_hat_2_2_autograd]])
-
-        # ------------------------------------------------------------------------------
-
         # Stacked states check
-        # t0 = time.time()
         if t == 0:
             print("INIT CONTROLLER!")
             x_hat.states_list[1] = self.controller.init_state()
@@ -411,15 +380,7 @@ class ILQRDynSysClosedLoop(BaseILQRDynSys):
 
 
         x_plant_new = self.plant.step(x_hat_.states_list[0], u_plant, t)
-        x_hat_new_ = StackedState([x_plant_new, x_c_new])#.requires_grad_(req_grad)
-        # x_plant_new = x_hat_new_.states_list[0]
-
-        # print("2:", time.time()-t0)
-        # f_hat_x_hat_ = dfdx_vmap(x_hat_new_, x_hat_)
-        # f_hat_u_hat_ = dfdx_vmap(x_hat_new_, u_hat_)
-
-        # print("dfdx", np.allclose(f_hat_x_hat_autograd, f_hat_x_hat_.numpy()))
-        # print("dfdx", np.allclose(f_hat_u_hat_autograd, f_hat_u_hat_.numpy()))
+        x_hat_new_ = StackedState([x_plant_new, x_c_new])
 
         self.append_step_rollout(
             u_hat_, x_hat_, x_hat_new_, u_plant, x_plant_old, x_plant_new
@@ -428,7 +389,7 @@ class ILQRDynSysClosedLoop(BaseILQRDynSys):
 
         viol = [viol]
         if t == self.T-1:
-            # print("TERMINALKA")
+            print("TERMINALKA")
             ilqr_l_term, aug_l_term , viol_term = self.compute_step_costs(self.T, x_hat_new_, x_plant_new)
 
             ilqr_l += ilqr_l_term

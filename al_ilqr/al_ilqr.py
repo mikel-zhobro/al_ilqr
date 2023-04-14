@@ -103,7 +103,7 @@ class AugmentedElements:
             cost = lamda_t.T @ c_t + 0.5 * c_t.T @ Iuk @ c_t
             violation = c_t.detach()  # .abs()
             violation[self.ineq_ix] = torch.clamp(violation[self.ineq_ix], min=0.0)
-        return cost.view(-1), violation
+        return cost.view(-1), violation.abs()
 
     # @torch.no_grad()
     def compute_aug_cost(
@@ -570,16 +570,23 @@ class PyLQR_iLQRSolver:
 
     def compute_loss_derivs(self):
         x_array, u_array = self.plant_dyn.get_rollouts()
+
+        if not self.plant_dyn.requires_grad:
+            x_array = [x.requires_grad_() for x in x_array]
+            u_array = [u.requires_grad_() for u in u_array]
         opt_c, ctrl_c, lqr_c, aug_c, _ = self.evaluate_trajectory_cost()
         ll = opt_c + ctrl_c + lqr_c + aug_c
+
+
 
         _start2 = time.time()
         ins = [x.d_in() for x in x_array]
         dx = torch.autograd.grad(ll, ins, allow_unused=True, create_graph=True)
         dxx = [dfdx_vmap(dfdx, x) for i, (dfdx, x) in enumerate(zip(dx, x_array))]
-        du = torch.autograd.grad(ll, u_array, allow_unused=True, create_graph=True)
-        duu = [dfdx_vmap(dfdu, u, True) for i, (dfdu, u) in enumerate(zip(du, u_array))]
-        dux = [dfdx_vmap(dfdu, x, True) for i, (dfdu, x) in enumerate(zip(du, x_array))]
+        uins = [u if torch.is_tensor(u) else u.d_in() for u in u_array]
+        du = torch.autograd.grad(ll, uins, allow_unused=True, create_graph=True)
+        duu = [dfdx_vmap(dfdu, u, True) for i, (dfdu, u) in enumerate(zip(du, uins))]
+        dux = [dfdx_vmap(dfdu, x, True) for i, (dfdu, x) in enumerate(zip(du, ins))]
         _end2 = time.time() - _start2
 
 
