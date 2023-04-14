@@ -171,7 +171,7 @@ class BaseILQRDynSys(ABC):
 
         _x0 = x0 if not self.feedback_controlled else StackedState([x0, self.controller.init_state()])
         # Case without feedback
-        if not k_array or not K_array: # i.e. either of the lists is empty
+        if not k_array or not K_array or not x_array: # i.e. either of the lists is empty
             tmp =  self._rollout(_x0, u_array)
             try:
                 self.plant.render2()

@@ -366,11 +366,11 @@ class PyLQR_iLQRSolver:
         if initializer is not None:
             assert initializer_u_init is not None, "If initializer is given make sure that its corresponding input is also inputed."
             initializer.set_step_cost(self.evaluate_step_cost)
-            J_total_new, J_ilqr_new, J_aug_new, violations_new, lqr_sys_f = self.rollout(initializer, 1e10, initializer_u_init)
+            J_total_new, J_ilqr_new, J_aug_new, violations_new = self.rollout(initializer, 1e10, initializer_u_init)
             _, u_init = initializer.get_plant_rollouts() # TODO: can also precompute derivatives, no need for second forw pass
 
 
-        J_total_new, J_ilqr_new, J_aug_new, violations_new, lqr_sys_f = self.rollout(self.plant_dyn, 1e10, u_init)
+        J_total_new, J_ilqr_new, J_aug_new, violations_new = self.rollout(self.plant_dyn, 1e10, u_init)
 
         self.iteration_log(-1, -1, violations_new)
 
@@ -383,24 +383,22 @@ class PyLQR_iLQRSolver:
         _i_max = self.conf.iter_max
         _i, _ii = 0, 0
         converged = False
-        # accept = True
+        accept = True
         for _ii in range(_ii_max):
             J_total, J_ilqr, J_aug, violations = self.evaluate_total_cost()
             reg_N = 0
-            accept = True
             for _i in range(_i_max):
                 print(
                     f"iLQR iteration: ------------------ Al-it: {_ii+1}/{_ii_max}  iLQR-it: {_i+1}/{_i_max} ------------------"
                 )
 
-                self.back_propagation(lqr_sys_f, accept)
+                self.back_propagation(accept, reset_losses=(_i == 0))
 
                 (
                     J_new_total,
                     J_new_ilqr,
                     J_new_aug,
                     violations_new,
-                    lqr_sys_f,
                     accept,
                     converged,
                 ) = self.forward_propagation(J_total, J_ilqr, J_aug)
@@ -500,7 +498,7 @@ class PyLQR_iLQRSolver:
         # 1. Line search (continue after the first alpha that improves the trajectory loss)
         alpha = self.conf.alpha_init
         for jj in range(self.conf.iter_line_search):
-            J_new_total, J_new_ilqr, J_new_aug, violations, lqr_sys = self.rollout(self.plant_dyn, J_total, u_array, x_array, alpha)
+            J_new_total, J_new_ilqr, J_new_aug, violations = self.rollout(self.plant_dyn, J_total, u_array, x_array, alpha)
 
             delta_J_ratio = (J_new_total - J_total) / (
                 self.delta_V_u * alpha + self.delta_V_uu * alpha**2 + 1e-6
@@ -526,7 +524,7 @@ class PyLQR_iLQRSolver:
             else:
                 alpha = 0.5 * alpha
         if not accept:
-            self.plant_dyn.reset_rollouts()
+            self.plant_dyn.reset_rollouts() # TODO: when we reset the rollouts is impossible to compute gradients again: we just cant call self.back_propagation(lqr_sys, True) twice.
 
         # see if it is converged
         converged = (
@@ -538,7 +536,6 @@ class PyLQR_iLQRSolver:
             J_new_ilqr,
             J_new_aug,
             violations,
-            lqr_sys,
             accept,
             converged,
         )
@@ -551,26 +548,8 @@ class PyLQR_iLQRSolver:
         x_array: Union[list[BaseState], None]=None,
         alpha=1.0,
     ):
-
         J_total_new, J_ilqr_new, J_aug_new, violations_new = plant_dyn.rollout(J_total, self.x0, x_array, u_array, self.k_array, self.K_array, alpha)
-
-        def deriv_dict():
-            dfdx, dfdu, t1 = plant_dyn.comp_derivs(alpha=self.conf.smooth_grad_a)
-            dldx, dldu, dldxx, dlduu, dldux, t2 = self.compute_loss_derivs()
-
-            res_dict: dict[str, list[torch.Tensor]] = {
-                "dfdx": dfdx,
-                "dfdu": dfdu,
-                "dldx": dldx,
-                "dldu": dldu,
-                "dldxx": dldxx,
-                "dlduu": dlduu,
-                "dldux": dldux,
-            }
-            print(f"  - DynSys/Losses deriv times({t1:.5f}/{t2:.5f})")
-            return res_dict
-
-        return J_total_new.item(), J_ilqr_new.item(), J_aug_new.item(), violations_new, deriv_dict
+        return J_total_new.item(), J_ilqr_new.item(), J_aug_new.item(), violations_new
 
     def compute_loss_derivs(self):
         x_array, u_array = self.plant_dyn.get_rollouts()
@@ -592,7 +571,33 @@ class PyLQR_iLQRSolver:
         _end2 = time.time() - _start2
         return list(dx), list(du), dxx, duu, dux, _end2
 
-    def back_propagation(self, lqr_sys_f, accept=True):
+    def compute_lqr_grad_dict(self, accept, reset_losses):
+        if accept:
+            dfdx, dfdu, t1 = self.plant_dyn.comp_derivs(alpha=self.conf.smooth_grad_a)
+            dldx, dldu, dldxx, dlduu, dldux, t2 = self.compute_loss_derivs()
+
+            lqr_sys: dict[str, list[torch.Tensor]] = {
+                "dfdx": dfdx,
+                "dfdu": dfdu,
+                "dldx": dldx,
+                "dldu": dldu,
+                "dldxx": dldxx,
+                "dlduu": dlduu,
+                "dldux": dldux,
+            }
+            print(f"  - DynSys/Losses deriv times({t1:.5f}/{t2:.5f})")
+        else:
+            lqr_sys = self.lqr_sys_backup
+            if reset_losses:
+                dldx, dldu, dldxx, dlduu, dldux, t2 = self.compute_loss_derivs()
+                lqr_sys["dldx"] = dldx
+                lqr_sys["dldu"] = dldu
+                lqr_sys["dldxx"] = dldxx
+                lqr_sys["dlduu"] = dlduu
+                lqr_sys["dldux"] = dldux
+        return lqr_sys
+
+    def back_propagation(self, accept=True, reset_losses=False):
         """
         Back propagation along the given state and control trajectories to solve
         the Riccati equations for the error system (delta_x, delta_u, t)
@@ -617,9 +622,8 @@ class PyLQR_iLQRSolver:
         the input & state of the plant.
 
         """
-        lqr_sys: dict[str, list[torch.Tensor]] = (
-            lqr_sys_f() if accept else self.lqr_sys_backup
-        )
+        lqr_sys = self.compute_lqr_grad_dict(accept, reset_losses)
+
         x_array, u_array = self.plant_dyn.get_rollouts()
         x_plant_array, u_plant_array = self.plant_dyn.get_plant_rollouts()
 
