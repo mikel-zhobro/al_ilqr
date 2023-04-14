@@ -569,32 +569,21 @@ class PyLQR_iLQRSolver:
         return J_total_new.item(), J_ilqr_new.item(), J_aug_new.item(), violations_new, deriv_dict
 
     def compute_loss_derivs(self):
-        _start2 = time.time()
         x_array, u_array = self.plant_dyn.get_rollouts()
-        if not self.plant_dyn.requires_grad:
-            x_array = [x.requires_grad_() for x in x_array]
-            u_array = [u.requires_grad_() for u in u_array]
-        dx = []
-        du = []
-        dxx = []
-        duu = []
-        dux = []
-
         opt_c, ctrl_c, lqr_c, aug_c, _ = self.evaluate_trajectory_cost()
         ll = opt_c + ctrl_c + lqr_c + aug_c
 
-        ll.backward(retain_graph=True, create_graph=True)
-        for i, (x, u) in enumerate(zip(x_array, u_array)):
-            dx.append(x.grad)
-            du.append(u.grad)
-            dxx.append(dfdx_vmap(dx[-1], x))
-            duu.append(dfdx_vmap(du[-1], u))
-            dux.append(dfdx_vmap(du[-1], x, True))
-        dx.append(x_array[-1].grad)
-        dxx.append(dfdx_vmap(dx[-1], x_array[-1]))
+        _start2 = time.time()
+        ins = [x.d_in() for x in x_array]
+        dx = torch.autograd.grad(ll, ins, allow_unused=True, create_graph=True)
+        dxx = [dfdx_vmap(dfdx, x) for i, (dfdx, x) in enumerate(zip(dx, x_array))]
+        du = torch.autograd.grad(ll, u_array, allow_unused=True, create_graph=True)
+        duu = [dfdx_vmap(dfdu, u, True) for i, (dfdu, u) in enumerate(zip(du, u_array))]
+        dux = [dfdx_vmap(dfdu, x, True) for i, (dfdu, x) in enumerate(zip(du, x_array))]
         _end2 = time.time() - _start2
-        return dx, du, dxx, duu, dux, _end2
 
+
+        return dx, du, dxx, duu, dux, _end2
     def back_propagation(self, lqr_sys_f, accept=True):
         """
         Back propagation along the given state and control trajectories to solve
