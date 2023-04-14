@@ -588,21 +588,22 @@ class PyLQR_iLQRSolver:
         """
         Back propagation along the given state and control trajectories to solve
         the Riccati equations for the error system (delta_x, delta_u, t)
-        Need to approximate the dynamics/costs/constraints along the given trajectory
-        dynamics needs a time-varying first-order approximation
-        costs and constraints need time-varying second-order approximation
+        First the dynamics/costs/constraints along the given trajectory are approximated,
+        - dynamics needs a time-varying first-order approximation
+        - costs and constraints need time-varying second-order approximation
 
         lqr_sys: if called returns a dict with first order state derivatives df_dx, df_du
         and loss derivatives up to second order dl_dx, dl_du, dl_dxx, dl_duu, dl_duxs.
 
-        In case we are using a closed loop approach the state is x_hat and includes bot the
+        Closed loop case:
+        -----------------
+        In case we are using a closed loop approach the state is x_hat and includes both the
         plants state and the state of the controller. On the other hand the input is
         the desired trajectory denoted by u_hat.
 
         So, in the case of closed loop constrained_ilqr x_array and u_array
         represent instead by x_hat_array and u_hat_array, i.e. rollout trajectories of the augmented state
         and contorller's input.
-
 
         To simplify setting up the problem we still allow to define the loss and constraints w.r.t
         the input & state of the plant.
@@ -618,22 +619,21 @@ class PyLQR_iLQRSolver:
         self.K_array = []
         _start = time.time()
         with torch.no_grad():
-
             # initialize with the terminal cost parameters to prepare the backpropagation
             Vx = lqr_sys["dldx"][-1].view(-1, 1)
             Vxx = lqr_sys["dldxx"][-1]
-            # (Vx, _, Vxx, _, _,) = self.augmented.augment_t(
-            #     len(u_array),
-            #     Vx,
-            #     0,
-            #     Vxx,
-            #     0,
-            #     0,
-            #     x_array[-1],
-            #     u_array[-1],
-            #     x_plant_array[-1],
-            #     u_plant_array[-1],
-            # )
+            (Vx, _, Vxx, _, _,) = self.augmented.augment_t(
+                len(u_array),
+                Vx,
+                0,
+                Vxx,
+                0,
+                0,
+                x_array[-1],
+                u_array[-1],
+                x_plant_array[-1],
+                u_plant_array[-1],
+            )
             self.delta_V_u = 0.0
             self.delta_V_uu = 0.0
             for t in reversed(range(self.T)):
@@ -652,9 +652,9 @@ class PyLQR_iLQRSolver:
                 # Augmented Lagrangian
                 x_t, u_t = x_array[t], u_array[t]
                 x_plant_t, u_plant_t = x_plant_array[t], u_plant_array[t]
-                # (Qx, Qu, Qxx, Quu, Qux,) = self.augmented.augment_t(
-                #     t, Qx, Qu, Qxx, Quu, Qux, x_t, u_t, x_plant_t, u_plant_t
-                # )
+                (Qx, Qu, Qxx, Quu, Qux,) = self.augmented.augment_t(
+                    t, Qx, Qu, Qxx, Quu, Qux, x_t, u_t, x_plant_t, u_plant_t
+                )
 
                 # Solve quadratic problem to find k and K
                 # -------------------------
