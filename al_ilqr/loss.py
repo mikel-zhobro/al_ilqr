@@ -60,7 +60,7 @@ class LossFunctionBase(ABC):
             _x = _x.requires_grad_()
             _u = _u.requires_grad_()
             l = self.evaluate(_x, _u, t, terminal)
-            l.backward(retain_graph=True, create_graph=True)
+            l.backward(retain_graph=True, create_graph=True) # TODO
 
         lx = self._dldx(_x, _u, t, terminal)
         lu = self._dldu(_x, _u, t, terminal)

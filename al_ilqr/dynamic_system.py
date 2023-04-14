@@ -158,6 +158,7 @@ class BaseILQRDynSys(ABC):
     def rollout(
         self,
         current_cost: float,
+        x0,
         x_array,  #: Union[list[BaseState], list[StackedState]],
         u_array,  #: list[torch.Tensor],
         k_array: list[torch.Tensor],
@@ -168,11 +169,10 @@ class BaseILQRDynSys(ABC):
         self.clear_rollouts()
         req_grad = self.requires_grad
 
-        x0 = x_array[0]
-
+        _x0 = x0 if not self.feedback_controlled else StackedState([x0, self.controller.init_state()])
         # Case without feedback
         if not k_array or not K_array: # i.e. either of the lists is empty
-            tmp =  self._rollout(x0, u_array)
+            tmp =  self._rollout(_x0, u_array)
             try:
                 self.plant.render2()
             except:
@@ -186,7 +186,7 @@ class BaseILQRDynSys(ABC):
         aug_cost = k_array[0].new_zeros(1)
 
         _start = time.time()
-        x = x0
+        x = _x0
         for t, u_tmp in enumerate(tqdm(u_array, desc="Rollout")):
             # Compute u
             u = u_tmp + (
@@ -370,6 +370,7 @@ class ILQRDynSysClosedLoop(BaseILQRDynSys):
         # Stacked states check
         if t == 0:
             print("INIT CONTROLLER!")
+            # x_hat = StackedState([x_hat, self.controller.init_state()])
             x_hat.states_list[1] = self.controller.init_state()
         x_hat_ = x_hat.detach().requires_grad_(req_grad)
         u_hat_ = u_hat.detach().requires_grad_(req_grad)

@@ -260,6 +260,8 @@ class PyLQR_iLQRSolver:
         self.delta_V_u: float
         self.delta_V_uu: float
 
+        self.x0: BaseState
+
     @property
     def T(self):
         return self.conf.T  # timesteps
@@ -345,6 +347,7 @@ class PyLQR_iLQRSolver:
             constraints:    ineq_constraints on state/control; ineq_constraints(x, u, t) <= 0
             constraints:    eq_constraints on state/control; eq_constraints(x, u, t) == 0
         """
+        self.x0 = x0
         # Prepare augmented AL
         if constraints is not None:
             self.augmented.add_constraints(constraints)
@@ -363,10 +366,11 @@ class PyLQR_iLQRSolver:
         if initializer is not None:
             assert initializer_u_init is not None, "If initializer is given make sure that its corresponding input is also inputed."
             initializer.set_step_cost(self.evaluate_step_cost)
-            J_total_new, J_ilqr_new, J_aug_new, violations_new, lqr_sys_f = self.rollout(initializer, 1e10, [x0], initializer_u_init)
+            J_total_new, J_ilqr_new, J_aug_new, violations_new, lqr_sys_f = self.rollout(initializer, 1e10, initializer_u_init)
             _, u_init = initializer.get_plant_rollouts() # TODO: can also precompute derivatives, no need for second forw pass
 
-        J_total_new, J_ilqr_new, J_aug_new, violations_new, lqr_sys_f = self.rollout(self.plant_dyn, 1e10, [x0], u_init)
+
+        J_total_new, J_ilqr_new, J_aug_new, violations_new, lqr_sys_f = self.rollout(self.plant_dyn, 1e10, u_init)
 
         self.iteration_log(-1, -1, violations_new)
 
@@ -463,7 +467,7 @@ class PyLQR_iLQRSolver:
             self.augmented.update_batch(*self.plant_dyn.get_plant_rollouts())
 
         # Final Log
-        res_dict = self.final_log( _i, _ii, time.time()-_start_time, x0)
+        res_dict = self.final_log( _i, _ii, time.time()-_start_time)
         return res_dict
 
     def forward_propagation(
@@ -496,7 +500,7 @@ class PyLQR_iLQRSolver:
         # 1. Line search (continue after the first alpha that improves the trajectory loss)
         alpha = self.conf.alpha_init
         for jj in range(self.conf.iter_line_search):
-            J_new_total, J_new_ilqr, J_new_aug, violations, lqr_sys = self.rollout(self.plant_dyn, J_total, x_array, u_array, alpha)
+            J_new_total, J_new_ilqr, J_new_aug, violations, lqr_sys = self.rollout(self.plant_dyn, J_total, u_array, x_array, alpha)
 
             delta_J_ratio = (J_new_total - J_total) / (
                 self.delta_V_u * alpha + self.delta_V_uu * alpha**2 + 1e-6
@@ -543,18 +547,18 @@ class PyLQR_iLQRSolver:
         self,
         plant_dyn: BaseILQRDynSys,
         J_total: float,
-        x_array: list[BaseState],
         u_array: Union[list[torch.Tensor], list[BaseState]],
+        x_array: Union[list[BaseState], None]=None,
         alpha=1.0,
     ):
 
-        J_total_new, J_ilqr_new, J_aug_new, violations_new = plant_dyn.rollout(J_total, x_array, u_array, self.k_array, self.K_array, alpha)
+        J_total_new, J_ilqr_new, J_aug_new, violations_new = plant_dyn.rollout(J_total, self.x0, x_array, u_array, self.k_array, self.K_array, alpha)
 
         def deriv_dict():
             dfdx, dfdu, t1 = plant_dyn.comp_derivs(alpha=self.conf.smooth_grad_a)
             dldx, dldu, dldxx, dlduu, dldux, t2 = self.compute_loss_derivs()
 
-            res_dict: dict[str, list] = {
+            res_dict: dict[str, list[torch.Tensor]] = {
                 "dfdx": dfdx,
                 "dfdu": dfdu,
                 "dldx": dldx,
@@ -577,8 +581,6 @@ class PyLQR_iLQRSolver:
         opt_c, ctrl_c, lqr_c, aug_c, _ = self.evaluate_trajectory_cost()
         ll = opt_c + ctrl_c + lqr_c + aug_c
 
-
-
         _start2 = time.time()
         ins = [x.d_in() for x in x_array]
         dx = torch.autograd.grad(ll, ins, allow_unused=True, create_graph=True)
@@ -588,9 +590,8 @@ class PyLQR_iLQRSolver:
         duu = [dfdx_vmap(dfdu, u, True) for i, (dfdu, u) in enumerate(zip(du, uins))]
         dux = [dfdx_vmap(dfdu, x, True) for i, (dfdu, x) in enumerate(zip(du, ins))]
         _end2 = time.time() - _start2
+        return list(dx), list(du), dxx, duu, dux, _end2
 
-
-        return dx, du, dxx, duu, dux, _end2
     def back_propagation(self, lqr_sys_f, accept=True):
         """
         Back propagation along the given state and control trajectories to solve
@@ -832,14 +833,14 @@ class PyLQR_iLQRSolver:
         with open(_log_dir + name + ".p", "wb") as f:
             pickle.dump(data, f)
 
-    def final_log(self, _i, _ii, time_taken, x0):
+    def final_log(self, _i, _ii, time_taken):
         nr_iters = (_ii + 1) * (_i + 1)
         # prepare result dictionary
         xp_array, up_array = self.plant_dyn.get_plant_rollouts()
         x_hat_arr, u_hat_arr = self.plant_dyn.get_rollouts()
         res_dict = {
             "feedback_ctrl": self.plant_dyn.feedback_controlled,
-            "x0": x0,
+            "x0": self.x0,
             "x_plant_array_opt": np.stack([x.numpy() for x in xp_array]),
             "u_plant_array_opt": torch.stack(up_array).cpu().detach().numpy(),
             "x_hat_array_opt": [x.clone() for x in x_hat_arr],

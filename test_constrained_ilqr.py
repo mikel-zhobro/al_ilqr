@@ -377,8 +377,6 @@ if __name__ == "__main__":
     # prepare initial guess
     u_init_traj: Union[list[torch.Tensor], list[BasicState]]
     if my_controller is not None:
-        x0 = StackedState([x0, my_controller.init_state()])
-        # u_init_traj = [u.detach().clone() for u in x_des_traj[:-1]]
         u_init_traj = [x_des_traj[-1].detach()]*T
     else:
         u_init_traj = list(
