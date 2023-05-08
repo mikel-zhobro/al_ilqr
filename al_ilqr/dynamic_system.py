@@ -17,7 +17,7 @@ class DynamicSystem(ABC):
         self.dt = dt
         self.nx = nx
         self.nu = nu
-        self.limits = limits
+        self.limits = [torch.tensor(a) for a in limits] if limits else None
 
     @abstractmethod
     def state(self):
