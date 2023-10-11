@@ -3,7 +3,6 @@ from typing import Any
 import torch
 import numpy as np
 from numpy import linalg as la
-from scipy.signal.windows import gaussian
 
 
 
@@ -43,6 +42,7 @@ def dfdx_vmap(y, x, allow_unused=False, create_graph=False) -> torch.Tensor:
     return torch.vmap(get_vjp)(I_N)
 
 def filter_me(sig, kernel_size=23, mode='replicate'):
+    from scipy.signal.windows import gaussian
     # sig: [N, W, H]
     assert sig.dim() > 1, "make sure the singal has at least 2 dims"
 

@@ -1,5 +1,6 @@
 """
-An Inverted Pendulum test for the AL-iLQR implementation
+An Inverted Pendulum test for the AL-iLQR implementation.
+Here we compare the analytical derivatives with the autodifferentiation derivatives.
 """
 from __future__ import print_function, annotations
 import torch
@@ -16,6 +17,9 @@ from al_ilqr.state import BasicState, StackedState
 from al_ilqr.constraints import EqConstraint, InEqConstraint, Constraint
 from al_ilqr.utils import dfdx_vmap
 
+# --------------------------------------------------------------------------------------
+# 1. Define the loss function
+# --------------------------------------------------------------------------------------
 class MyLossAuto(LossFunctionBase):
     def __init__(self, T) -> None:
         super().__init__(1, 1)
@@ -122,6 +126,10 @@ class MyLoss(LossFunctionBase):
         return dldux
 
 
+
+# --------------------------------------------------------------------------------------
+# 1. Define the dynamic system
+# --------------------------------------------------------------------------------------
 class InvPendulumDynSysAuto(DynamicSystem):
     def __init__(self):
         # parameters
@@ -240,6 +248,9 @@ class InvPendulumDynSys(DynamicSystem):
         return dfdu
 
 
+# --------------------------------------------------------------------------------------
+# 1. Define an optional controller
+# --------------------------------------------------------------------------------------
 class PIController(Controller):
     def __init__(self, base_tensor: torch.Tensor) -> None:
         self.ki = 0.004 * base_tensor.new_ones(2)
@@ -323,7 +334,7 @@ def plot_ilqr_result(res):
 if __name__ == "__main__":
     T = 150
     analytical = False
-    test = False  # for this, analytical has to also be yes
+    test = True  # for this case the analytical and autodiff derivatives are asserted to be equal
     controlled = True
 
     # --------------------------------------------------------------------------------------
@@ -354,6 +365,11 @@ if __name__ == "__main__":
     # --# --------------------------------------------------------------------------------------
     x0 = BasicState(torch.tensor([torch.pi - 2, 0]))
     x_des_traj = [BasicState(torch.tensor([torch.pi / 2.0, torch.pi / 2.0]))] * T
+
+
+    # --# --------------------------------------------------------------------------------------
+    # --# Define constraints
+    # --# --------------------------------------------------------------------------------------
     my_constraints: list[Constraint] = []
 
     def eq_c(x: BasicState, u, t):

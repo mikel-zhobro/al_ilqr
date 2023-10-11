@@ -1,5 +1,5 @@
 import torch
-from typing import Any, Union
+from typing import Any, Union, List
 import numpy as np
 
 from .state import BaseState
@@ -58,12 +58,12 @@ class Optim:
     def solve_ilqr_problem(
         self,
         x0: BaseState,
-        x_des_traj: list[BaseState],
-        u_init_traj: Union[list[torch.Tensor], list[BaseState]],
-        constraints: Union[list[Constraint], None]=None,
+        x_des_traj: List[BaseState],
+        u_init_traj: Union[List[torch.Tensor], List[BaseState]],
+        constraints: Union[List[Constraint], None]=None,
         verbose=True,
         initializer_ctrl: Union[Controller, None]=None,
-        initializer_u_init: Union[list[BaseState], None]=None
+        initializer_u_init: Union[List[BaseState], None]=None
     ):
         self.res_dict["T"] = self.T
         self.res_dict["x_plant_array_des"] = np.stack([x.numpy() for x in x_des_traj])

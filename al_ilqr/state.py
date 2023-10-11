@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 import torch
 import numpy as np
-from pytorch3d.transforms import so3_log_map, so3_exp_map, matrix_to_quaternion
+from pytorch3d.transforms import so3_log_map, so3_exponential_map, matrix_to_quaternion
 
 
 def get_body_state(state: MultiBodyState, ixs: list[int]):
@@ -237,7 +237,7 @@ class MultiBodyState(BaseState):
         self.p = self.p + tmp_dste[:, :3]
         self.v = self.v + tmp_dste[:, 3:6]
         self.R = (
-            so3_exp_map(tmp_dste[:, 6:9]) @ self.R
+            so3_exponential_map(tmp_dste[:, 6:9]) @ self.R
         )  # global frame: self.R + d_state
         self.w = self.w + tmp_dste[:, 9:]
         return self

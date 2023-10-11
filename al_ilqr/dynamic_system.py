@@ -280,7 +280,7 @@ class ILQRDynSys(BaseILQRDynSys):
         viol = [viol]
 
         if t == self.T-1:
-            # print("TERMINALKA no feedback")
+            # print("TERMINAL no feedback")
             ilqr_l_term, aug_l_term , viol_term = self.compute_step_costs(self.T, x_t, x_t)
             ilqr_l += ilqr_l_term
             aug_l += aug_l_term
@@ -390,7 +390,7 @@ class ILQRDynSysClosedLoop(BaseILQRDynSys):
 
         viol = [viol]
         if t == self.T-1:
-            print("TERMINALKA")
+            # print("TERMINAL")
             ilqr_l_term, aug_l_term , viol_term = self.compute_step_costs(self.T, x_hat_new_, x_plant_new)
 
             ilqr_l += ilqr_l_term
