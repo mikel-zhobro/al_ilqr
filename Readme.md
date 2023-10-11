@@ -4,7 +4,7 @@ The implementation is based on the paper [Bjack. et. al](https://bjack205.github
 
 ## Installation
 ``` bash
-git clone git@gitlab.localnet:embodied-vision/mikel-zhobro/planning-with-differentiable-physics/al_ilqr.git
+git clone https://github.com/mikel-zhobro/al_ilqr.git
 cd al_ilqr
 
 # create virtual environment
@@ -28,7 +28,7 @@ python test_constrained_ilqr.py
 README.md                                           # this file
 setup.py                                            # setup file for the package
 
-test_state.py                                       # script for testing the state class
+test_state.py                                       # script that shows how to use the state class
 test_constrained_ilqr.py                            # script for testing the constrained ilqr class
 
 al_ilqr                                             # package containing the code
